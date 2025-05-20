@@ -1,0 +1,154 @@
+---
+- name: Install LAMP stack and Elgg 3.3.25 on RHEL 9.3
+  hosts: all
+  become: yes
+
+  vars:
+    elgg_version: "3.3.25"
+    elgg_install_dir: "/var/www/html/elgg"
+    elgg_data_dir: "/var/elgg_data"
+
+  tasks:
+    - name: Update all packages
+      dnf:
+        name: '*'
+        state: latest
+        update_cache: yes
+
+    - name: Install Apache HTTP server
+      dnf:
+        name: httpd
+        state: present
+
+    - name: Start and enable Apache service
+      service:
+        name: httpd
+        state: started
+        enabled: yes
+
+    - name: Install MariaDB server
+      dnf:
+        name: mariadb-server
+        state: present
+
+    - name: Start and enable MariaDB service
+      service:
+        name: mariadb
+        state: started
+        enabled: yes
+
+    - name: Install PHP and required extensions for Elgg 3.3.25
+      dnf:
+        name:
+          - php
+          - php-mysqlnd
+          - php-gd
+          - php-cli
+          - php-mbstring
+          - php-curl
+          - php-xml
+          - php-json
+          - php-zip
+          - php-pdo
+          - php-intl
+          - php-openssl
+          - php-fileinfo
+        state: present
+
+    - name: Set PHP memory_limit to 256M
+      ini_file:
+        path: /etc/php.ini
+        section: PHP
+        option: memory_limit
+        value: '256M'
+
+    - name: Set PHP max_execution_time to 60
+      ini_file:
+        path: /etc/php.ini
+        section: PHP
+        option: max_execution_time
+        value: '60'
+
+    - name: Set PHP upload_max_filesize to 20M
+      ini_file:
+        path: /etc/php.ini
+        section: PHP
+        option: upload_max_filesize
+        value: '20M'
+
+    - name: Set PHP post_max_size to 25M
+      ini_file:
+        path: /etc/php.ini
+        section: PHP
+        option: post_max_size
+        value: '25M'
+
+    - name: Ensure allow_url_fopen is On in PHP
+      ini_file:
+        path: /etc/php.ini
+        section: PHP
+        option: allow_url_fopen
+        value: 'On'
+
+    - name: Enable Apache mod_rewrite
+      lineinfile:
+        path: /etc/httpd/conf.modules.d/00-base.conf
+        regexp: '^LoadModule rewrite_module'
+        line: 'LoadModule rewrite_module modules/mod_rewrite.so'
+        state: present
+        insertafter: '^# LoadModule rewrite_module'
+
+    - name: Create Elgg data directory
+      file:
+        path: "{{ elgg_data_dir }}"
+        state: directory
+        owner: apache
+        group: apache
+        mode: '0755'
+
+    - name: Download Elgg {{ elgg_version }} zip archive
+      get_url:
+        url: "https://elgg.org/download/elgg-{{ elgg_version }}.zip"
+        dest: /tmp/elgg.zip
+        mode: '0644'
+
+    - name: Create temp directory for Elgg unzip
+      file:
+        path: /tmp/elgg_unzip
+        state: directory
+        mode: '0755'
+
+    - name: Unzip Elgg archive to temp directory
+      shell: unzip -q /tmp/elgg.zip -d /tmp/elgg_unzip
+      args:
+        creates: /tmp/elgg_unzip/elgg-{{ elgg_version }}
+
+    - name: Ensure Elgg install directory exists
+      file:
+        path: "{{ elgg_install_dir }}"
+        state: directory
+        owner: apache
+        group: apache
+        mode: '0755'
+
+    - name: Copy Elgg files to target directory
+      command: cp -r /tmp/elgg_unzip/elgg-{{ elgg_version }}/. {{ elgg_install_dir }}/
+
+    - name: Remove temp unzip directory
+      file:
+        path: /tmp/elgg_unzip
+        state: absent
+
+    - name: Set correct permissions on Elgg directory
+      file:
+        path: "{{ elgg_install_dir }}"
+        state: directory
+        owner: apache
+        group: apache
+        mode: '0755'
+        recurse: yes
+
+    - name: Restart Apache service
+      service:
+        name: httpd
+        state: restarted
